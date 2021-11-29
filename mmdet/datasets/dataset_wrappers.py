@@ -13,7 +13,7 @@ from .builder import DATASETS, PIPELINES
 from .coco import CocoDataset
 
 
-@DATASETS.register_module()
+@DATASETS.register_module()             # 语法糖，提前给DATASETS做好相关的配置。
 class ConcatDataset(_ConcatDataset):
     """A wrapper of concatenated dataset.
 

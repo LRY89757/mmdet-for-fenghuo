@@ -45,7 +45,7 @@ def build_loss(cfg):
     return LOSSES.build(cfg)
 
 
-def build_detector(cfg, train_cfg=None, test_cfg=None):
+def  build_detector(cfg, train_cfg=None, test_cfg=None):
     """Build detector."""
     if train_cfg is not None or test_cfg is not None:
         warnings.warn(
