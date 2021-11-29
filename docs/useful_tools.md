@@ -222,7 +222,7 @@ curl -O curl -O https://raw.githubusercontent.com/pytorch/serve/master/docs/imag
 curl http://127.0.0.1:8080/predictions/${MODEL_NAME} -T 3dogs.jpg
 ```
 
-You should obtain a respose similar to:
+You should obtain a response similar to:
 
 ```json
 [
@@ -472,3 +472,21 @@ differential_evolution step 489: f(x)= 0.386625
 2021-07-19 19:46:40,776 - mmdet - INFO Anchor differential evolution result:[[10, 12], [15, 30], [32, 22], [29, 59], [61, 46], [57, 116], [112, 89], [154, 198], [349, 336]]
 2021-07-19 19:46:40,798 - mmdet - INFO Result saved in work_dirs/anchor_optimize_result.json
 ```
+
+## Confution Matrix
+
+A confusion matrix is a summary of prediction results.
+
+`tools/analysis_tools/confusion_matrix.py` can analyze the prediction results and plot a confution matrix table.
+
+First, run `tools/test.py` to save the `.pkl` detection results.
+
+Then, run
+
+```
+python tools/analysis_tools/confusion_matrix.py ${CONFIG}  ${DETECTION_RESULTS}  ${SAVE_DIR} --show
+```
+
+And you will get a confution matrix like this:
+
+![confution_matrix_example](https://user-images.githubusercontent.com/12907710/140513068-994cdbf4-3a4a-48f0-8fd8-2830d93fd963.png)
