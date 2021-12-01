@@ -9,7 +9,7 @@ def move_file(old_path, imgs,  new_path):
     '''这个函数是用来移动图片和相应的json文件'''
     print(old_path)
     print(new_path)
-    # filelist = os.listdir(old_path) #列出该目录下的所有文件,listdir返回的文件列表是不包含路径的。
+    # filelist = os.listdir(old_path) # 列出该目录下的所有文件,listdir返回的文件列表是不包含路径的。
     filelist = imgs
     print(filelist)
     for file in filelist:

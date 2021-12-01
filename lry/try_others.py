@@ -4,6 +4,9 @@ from mmdet.apis import init_detector,inference_detector, show_result_pyplot
 import mmcv
 import os
 import glob
+from PIL import Image
+from torchvision.transforms import ToTensor
+import torch as t
 
 # config_file = "/home/lry/projects/mmdetection/configs/mask_rcnn/mask_rcnn_r50_caffe_fpn_mstrain-poly_3x_coco.py"
 # checkpoint_file = "/home/lry/projects/mmdetection/checkpoints/mask_rcnn_r50_caffe_fpn_mstrain-poly_3x_coco_bbox_mAP-0.408__segm_mAP-0.37_20200504_163245-42aa3d00.pth"
@@ -16,13 +19,27 @@ model = init_detector(config_file, checkpoint_file,device="cuda:3")
 # result = inference_detector(model, img)
 # model.show_result(img, result, out_file='/home/lry/projects/mmdetection/lry/demo.jpg')
 
-root = '/home/lry/data/780b_std'
-imgs = glob.glob("/home/lry/data/780b_std/*.jpg")
-print(imgs)
-for i, img in enumerate(imgs):
-    result = inference_detector(model, img)
-    # model.show_result(img, result, out_file=f'/home/lry/projects/mmdetection/lry/demo{i}.jpg')
-    print(result)
+# root = '/home/lry/data/780b_std'
+# imgs = glob.glob("/home/lry/data/780b_std/*.jpg")
+# print(imgs)
+# for i, img in enumerate(imgs):
+#     result = inference_detector(model, img)
+#     # model.show_result(img, result, out_file=f'/home/lry/projects/mmdetection/lry/demo{i}.jpg')
+#     # print(result.shape)
+#     print(result)
+#     print('\n')
+#     print(result[0])
+#     print('\n')
+#     print(result[0][0])
+
+img = '/home/lry/projects/mmdetection/data/780b_std/IMG_20211021_153945.jpg'
+result = inference_detector(model, img)
+print(result, '\n\n', result[0], '\n\n', result[0][0])
+print(result[1][0][0].shape)
+img = Image.open(img)
+print(ToTensor()(img).shape)
+
+print()
 
 # imgs = "../demo/demo.jpg"
 # root = "/home/lry/data/tiny_vid/dog"
