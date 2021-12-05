@@ -7,7 +7,19 @@ import copy
 import glob
 
 global Classes 
-Classes = []
+# Classes = []
+# Classes = ['GFI1-1', 'O622-8', 'GFI1-2', 'XGI2', 'E1-63', 'fake', 'O2500-4', 
+# 'O9953', 'unrecognizable', 'O622-4', 'GFI2', 'others', '10GFEC', 'empty', 
+# '780B', 'GFI2-R', 'O155-8', 'GFI1-3', 'O2500']
+# Classes = ['GFI1', 'O622-8', 'XGI2', 'E1-63', 'fake', 
+# 'O9953', 'unrecognizable', 'O622-4', 'GFI2', 'others', '10GFEC', 'empty', 
+# 'GFI2', 'O155-8', 'O2500']
+Classes = {'GFI1-1': 'GFI1-1', 'O622-8': 'O622155-8', 'GFI1-2': 'GFI12R2',
+ 'XGI2': 'XGI2', 'E1-63': 'E1-63', 'fake': 'fake', 'O2500-4': 'O2500622-4', 
+ 'O9953': 'O9953GFEC', 'unrecognizable': 'unrecognizable', 'O622-4': 'O2500622-4',
+  'GFI2': 'GFI12R2', 'others': 'others', '10GFEC': 'O9953GFEC', 'empty': 'empty', 
+ 'GFI2-R': 'GFI12R2', 'O155-8': 'O622155-8', 'GFI1-3': 'GFI1-3', 'O2500': 'O2500'}
+
 
 def points2pad(points, img_cv):
     '''
@@ -109,8 +121,13 @@ def segementation_single(img_json):
 
     for i, shape in enumerate(shapes):
         label = shape['label']
-        if label not in Classes:
-            Classes.append(label)
+        # if label not in Classes:
+        #     Classes.append(label)
+        if label == '780B':
+            continue
+        else:
+            label = Classes[label]
+
         points = shape['points']
         bbox = points2bbox(points)
         img1 = points2padded(points, img_cv)
@@ -128,9 +145,9 @@ def segementation_single(img_json):
 if __name__ == '__main__':
     root = '/home/lry/projects/mmdetection/data/780b'
     img_jsons = glob.glob(root + '/*.json')
-    map(segementation_single, img_jsons)
-    # for img_json in img_jsons:
-    #     segementation_single(img_json)
+    # map(segementation_single, img_jsons)
+    for img_json in img_jsons:
+        segementation_single(img_json)
     # with open('/home/lry/data/780b_singe_padded/classes.txt', w)as f:
     #     f.write("\n".join(str(_) for _ in Classes)
     # a = ['a', 'b', 'c']

@@ -1592,6 +1592,46 @@ _base_ = [
 ## dataloader in mmdet
 再稍微说一下关于Rigistry还有继承类需要做的一些东西。
 
+我们继续从上文中得到的在`mmdet/datasets/coco.py`中看到的CocoDataset类的内容（仅仅选择了一部分，完整版看[这里](https://github.com/open-mmlab/mmdetection/blob/master/mmdet/datasets/coco.py)）：
+```python
+# Copyright (c) OpenMMLab. All rights reserved.
+
+@DATASETS.register_module()
+class CocoDataset(CustomDataset):
+
+    CLASSES = ('person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
+               'train', 'truck', 'boat', 'traffic light', 'fire hydrant',
+               'stop sign', 'parking meter', 'bench', 'bird', 'cat', 'dog',
+               'horse', 'sheep', 'cow', 'elephant', 'bear', 'zebra', 'giraffe',
+               'backpack', 'umbrella', 'handbag', 'tie', 'suitcase', 'frisbee',
+               'skis', 'snowboard', 'sports ball', 'kite', 'baseball bat',
+               'baseball glove', 'skateboard', 'surfboard', 'tennis racket',
+               'bottle', 'wine glass', 'cup', 'fork', 'knife', 'spoon', 'bowl',
+               'banana', 'apple', 'sandwich', 'orange', 'broccoli', 'carrot',
+               'hot dog', 'pizza', 'donut', 'cake', 'chair', 'couch',
+               'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop',
+               'mouse', 'remote', 'keyboard', 'cell phone', 'microwave',
+               'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock',
+               'vase', 'scissors', 'teddy bear', 'hair drier', 'toothbrush')
+
+    def load_annotations(self, ann_file):
+        """Load annotation from COCO style annotation file.
+
+        Args:
+            ann_file (str): Path of annotation file.
+
+        Returns:
+
+```
+
+主要是看一下`@DATASETS.register_module()`这个装饰器，关于装饰器的语法深入的部分不再说，我们这里只需要知道这个就相当于我们注册了有关的`Rigistry`,从这个定义之后，我们只需要就像前面一样`dataset_type = 'CocoDataset'`就可以将这个dataloader放到MMdet中。
+
+另外如果自己要写dataloader的话，类需要继承的就是`from .custom import CustomDataset`中的`CustomDataset`.
+
+另外我们还要注意的是
+
+
+
 ## 图像分割盘符切片数据预处理操作
 
 ### Preface
@@ -1633,7 +1673,562 @@ _base_ = [
 * 保存，注意图片标签的保存
 
 
-### 普通labelme文件读取分析
+
+
+
+### 普通labelme文件读取至最终导出分类数据集分析
+
+#### 源代码
+
+首先源代码如下：
+```python
+import cv2
+import os
+from PIL import Image
+import numpy as np
+import json
+import copy
+import glob
+
+Classes = []
+
+def points2pad(points, img_cv):
+    '''
+    input:
+    points:所给的四个顶点。
+    img_cv:图片np.array
+    output:
+    需要padd的四个角的三角形的三个顶点。
+    '''
+    # points = np.array([np.array(map(int, point)) for point in points])
+    points = np.array([np.array(list(map(int, point))) for point in points])
+
+    triangles = np.zeros((4, 3, 2), dtype='int32')
+    xmin, ymin, xmax, ymax = points2bbox(points)
+    if points[0][1] < points[1][1]:
+        # 左上角
+        triangles[0][0] += points[0]
+        triangles[0][1] += points[3] 
+        triangles[0][2] += np.array([xmin, ymin], dtype='int32')
+        # 左下角
+        triangles[1][0] += points[2]
+        triangles[1][1] += points[3]
+        triangles[1][2] += np.array([xmin, ymax], dtype='int32')
+        # 右上角
+        triangles[2][0] += points[0]
+        triangles[2][1] += points[1]
+        triangles[2][2] += np.array([xmax, ymin], dtype='int32')
+        # 右下角
+        triangles[3][0] += points[2]
+        triangles[3][1] += points[1]
+        triangles[3][2] += np.array([xmax, ymax], dtype='int32')
+
+    else:
+        # 左上角
+        triangles[0][0] += points[0]
+        triangles[0][1] += points[1]
+        triangles[0][2] += np.array([xmin, ymin], dtype='int32')
+        # 左下角
+        triangles[1][0] += points[0]
+        triangles[1][1] += points[3]
+        triangles[1][2] += np.array([xmin, ymax], dtype='int32')
+        # 右上角
+        triangles[2][0] += points[2]
+        triangles[2][1] += points[1]
+        triangles[2][2] += np.array([xmax, ymin], dtype='int32')
+        # 右下角
+        triangles[3][0] += points[2]
+        triangles[3][1] += points[3]
+        triangles[3][2] += np.array([xmax, ymax], dtype='int32')
+
+    return triangles
+
+
+# 从四个点得到一个大的bbox：
+def points2bbox(points):
+    '''
+    input:
+    points:所给的四个点
+    img: 所给图片的信息
+    output:
+    bbox的左上和右下
+    '''
+    points = np.array(points)
+    xmin = np.min(points[:, 0])
+    xmax = np.max(points[:, 0])
+    ymin = np.min(points[:, 1])
+    ymax = np.max(points[:, 1])
+    return int(xmin), int(ymin), int(xmax), int(ymax)
+
+def points2padded(points, img_cv):
+    triangles = points2pad(points, img_cv)
+    img1 = copy.copy(img_cv)
+    img1 = cv2.fillConvexPoly(img1, triangles[0], (0, 0, 0))
+    img1 = cv2.fillConvexPoly(img1, triangles[1], (0, 0, 0))
+    img1 = cv2.fillConvexPoly(img1, triangles[2], (0, 0, 0))
+    img1 = cv2.fillConvexPoly(img1, triangles[3], (0, 0, 0))
+    return img1
+
+
+
+
+
+def segementation_single(img_json):
+    with open(img_json, 'r') as f:
+        load_dict = json.load(f)
+
+    # type(load_dict), load_dict.keys()
+
+    # load_dict['imagePath']
+
+    img_cv = cv2.imread(os.path.join(root, load_dict['imagePath']))
+
+    # print(img_cv.shape)
+
+    shapes = load_dict['shapes']
+
+    # bbox = points2bbox(one_dict['points'])
+
+    for i, shape in enumerate(shapes):
+        label = shape['label']
+        if label not in Classes:
+            Classes.append(label)
+        points = shape['points']
+        bbox = points2bbox(points)
+        img1 = points2padded(points, img_cv)
+        # cv2.imwrite('/home/lry/projects/mmdetection/lry/image_processing/demo/pad_demo.jpg', img1[bbox[1]:bbox[3], bbox[0]:bbox[2]])
+        try:
+            cv2.imwrite(f'/home/lry/data/780b_singe_padded/{img_json[-24:-5]}{i}{label}.jpg', img1[bbox[1]:bbox[3], bbox[0]:bbox[2]])
+        except:
+            pass
+    print(f"image {img_json[-24:-5]} padded!\n")
+
+
+
+
+if __name__ == '__main__':
+    root = '/home/lry/projects/mmdetection/data/780b'
+    img_jsons = glob.glob(root + '/*.json')
+    # map(segementation_single, img_jsons)
+    for img_json in img_jsons:
+        segementation_single(img_json)
+    # with open('/home/lry/data/780b_singe_padded/classes.txt', w)as f:
+    #     f.write("\n".join(str(_) for _ in Classes)
+    # a = ['a', 'b', 'c']
+    # print(" ".join(str(_) for _ in a))  # https://www.delftstack.com/zh/howto/python/how-to-convert-a-list-to-string/
+
+# img_jsons = glob.glob(root + '/*.json')
+# print(imgs_jsons)
+```
+首先我们利用json.load()来读取json文件：
+```python
+    with open(img_json, 'r') as f:
+        load_dict = json.load(f)
+```
+而读取获得的是一个字典的形式，我们知道`labelme.json`的主要内容形式为（很早之前已经分析过了）：
+[![](https://s6.jpg.cm/2021/12/02/LWOJ5z.png)](https://imagelol.com/image/LWOJ5z)
+
+这里面比较重要的也就是`imagePath`和`shapes`这两个部分.imagePath用来导入加载图片，而shapes用来加载相关的文件信息，我们重点要处理的部分就是利用shapes的信息来处理加工得到最终我们需要的图片。
+
+我们知道每个图片都有19个盘区，而对于盘的分区就在labelme.json的shapes里面，shapes内主要有：
+[![](https://s6.jpg.cm/2021/12/02/LWOrbX.png)](https://imagelol.com/image/LWOrbX)
+
+里面的元素也是字典形式来组成的，"label"就是小盘的种类，而points就是点坐标。这两个是我们重点需要考虑的地方。
+
+
+#### `points2bbox()`
+首先看我们函数`points2bbox`,它用来转化从一个斜的框得到一个得到一个大的能将斜框正好完全包裹的水平框：
+```python
+# 从四个点得到一个大的正好能完全包裹小盘的水平bbox：
+def points2bbox(points):
+    '''
+    input:
+    points:所给的四个点
+    img: 所给图片的信息
+    output:
+    bbox的左上和右下
+    '''
+    points = np.array(points)
+    xmin = np.min(points[:, 0])
+    xmax = np.max(points[:, 0])
+    ymin = np.min(points[:, 1])
+    ymax = np.max(points[:, 1])
+    return int(xmin), int(ymin), int(xmax), int(ymax)
+```
+返回值为水平框的左上与右下坐标。
+
+#### `points2pad()`
+其次是函数points2pad,由于目前我只知道在opencv中可以通过凸多边形顶点点坐标的方式，也就是函数`cv2.fillConvexPoly`来涂黑区域，所以目前要做的第二件事就是从上面函数points2bbox中得到的一个小盘水平框中位于四个角的三角形的三个顶点在大盘中的位置，虽然说着比较绕，但是思路是非常简单的，当然写代码的时候图形的有关坐标找准还是非常难的，我踩了好多次坑弄了好多次才写对。
+我发现需要注意的一个问题是好像是关于cv2的读取，读取坐标必须是整数，所以图片的 参数必须是`int32`型，`int64`都是错误有问题的。
+返回值就是我们的三角形np矩阵shape为(4, 3, 2),4就是4个三角形，3即为三角形三个点坐标，2即为单个坐标的x, y值。
+```python
+def points2pad(points, img_cv):
+    '''
+    input:
+    points:所给的四个顶点。
+    img_cv:图片np.array
+    output:
+    需要padd的四个角的三角形的三个顶点。
+    '''
+    # points = np.array([np.array(map(int, point)) for point in points])
+    points = np.array([np.array(list(map(int, point))) for point in points])
+
+    triangles = np.zeros((4, 3, 2), dtype='int32')
+    xmin, ymin, xmax, ymax = points2bbox(points)
+    if points[0][1] < points[1][1]:
+        # 左上角
+        triangles[0][0] += points[0]
+        triangles[0][1] += points[3] 
+        triangles[0][2] += np.array([xmin, ymin], dtype='int32')
+        # 左下角
+        triangles[1][0] += points[2]
+        triangles[1][1] += points[3]
+        triangles[1][2] += np.array([xmin, ymax], dtype='int32')
+        # 右上角
+        triangles[2][0] += points[0]
+        triangles[2][1] += points[1]
+        triangles[2][2] += np.array([xmax, ymin], dtype='int32')
+        # 右下角
+        triangles[3][0] += points[2]
+        triangles[3][1] += points[1]
+        triangles[3][2] += np.array([xmax, ymax], dtype='int32')
+
+    else:
+        # 左上角
+        triangles[0][0] += points[0]
+        triangles[0][1] += points[1]
+        triangles[0][2] += np.array([xmin, ymin], dtype='int32')
+        # 左下角
+        triangles[1][0] += points[0]
+        triangles[1][1] += points[3]
+        triangles[1][2] += np.array([xmin, ymax], dtype='int32')
+        # 右上角
+        triangles[2][0] += points[2]
+        triangles[2][1] += points[1]
+        triangles[2][2] += np.array([xmax, ymin], dtype='int32')
+        # 右下角
+        triangles[3][0] += points[2]
+        triangles[3][1] += points[3]
+        triangles[3][2] += np.array([xmax, ymax], dtype='int32')
+
+    return triangles
+```
+
+#### `points2padded()`
+该函数就是利用函数`cv2.fillConvexPoly`来将四个角的三角形全都涂黑。然后返回图片的截取后的小矩形块。
+
+```python
+def points2padded(points, img_cv):
+    triangles = points2pad(points, img_cv)
+    img1 = copy.copy(img_cv)
+    img1 = cv2.fillConvexPoly(img1, triangles[0], (0, 0, 0))
+    img1 = cv2.fillConvexPoly(img1, triangles[1], (0, 0, 0))
+    img1 = cv2.fillConvexPoly(img1, triangles[2], (0, 0, 0))
+    img1 = cv2.fillConvexPoly(img1, triangles[3], (0, 0, 0))
+    return img1
+
+```
+
+#### `segementation_single()`
+
+该函数是综合以上所有的函数来将我们的单张导入的labelme标注的图片的json信息来分割图片得到每个的小矩形图片来保存。
+
+```python
+def segementation_single(img_json):
+    with open(img_json, 'r') as f:
+        load_dict = json.load(f)
+
+    # type(load_dict), load_dict.keys()
+
+    # load_dict['imagePath']
+
+    img_cv = cv2.imread(os.path.join(root, load_dict['imagePath']))
+
+    # print(img_cv.shape)
+
+
+    shapes = load_dict['shapes']
+
+    # bbox = points2bbox(one_dict['points'])
+
+    for i, shape in enumerate(shapes):
+        label = shape['label']
+        if label not in Classes:
+            Classes.append(label)
+        points = shape['points']
+        bbox = points2bbox(points)
+        img1 = points2padded(points, img_cv)
+        # cv2.imwrite('/home/lry/projects/mmdetection/lry/image_processing/demo/pad_demo.jpg', img1[bbox[1]:bbox[3], bbox[0]:bbox[2]])
+        try:
+            cv2.imwrite(f'/home/lry/data/780b_singe_padded/{img_json[-24:-5]}{i}{label}.jpg', img1[bbox[1]:bbox[3], bbox[0]:bbox[2]])
+        except:
+            pass
+    print(f"image {img_json[-24:-5]} padded!\n")
+```
+
+#### `__main__()`
+
+用来执行程序，当然这里本来想用map函数来加速运行处理的速度，但是这里却报了一个错，这里最后还是选择了循环当然个人猜测可能是因为这里segementation自定义的这个函数没有返回值的缘故，说不定定义一个`return 0`就好了，当然这里没空再重新试一遍了，无所谓了。
+
+
+```python
+if __name__ == '__main__':
+    root = '/home/lry/projects/mmdetection/data/780b'
+    img_jsons = glob.glob(root + '/*.json')
+    # map(segementation_single, img_jsons)
+    for img_json in img_jsons:
+        segementation_single(img_json)
+```
+
+
+
+# 2021.12.2日下午更新
+昨天做了关于数据集的整理操作以及关于数据的转化操作，目前一个成熟的数据集已经转化完成，不过**相关记录文档没有完成**，确实没有时间记录了，等这两天记录一下。
+同时昨天也写了关于文件的dataloader的读取，这方面还是花了一些心思的，目前接下来的任务就是构建相关模型然后进行有关的训练，当然这里考虑使用不同的有关模型比如说resnet101, regnet这类都尝试一下，当然可以直接从torchvision.models直接导入有关的模型。
+
+这里需要注意的是正好我们可以将整个的模型的训练，数据可视化，调整可视化等等这一系列的操作都尝试学习操作一遍，虽然之前也整过好多遍，但是自从学了mmdetection之后就很少弄了，可以再深入探索一下。
+
+另外
+
+一些参考文档：
+- https://blog.csdn.net/weixin_36670529/article/details/105910572
+- 
+
+
+# 2021.12.3日下午更新
+
+## Preface
+
+数据处理有关的记录文档昨天已经整理完毕。为了吸取教训，以后还是边写边整理文档比较好，除非是时间过于紧急。
+
+今天就写一下有关模型，根据目前的进展，任务主要如下：
+- 关于验证集、训练集的划分
+- train_one_epoch函数
+- 计算验证集准确率的函数
+- 使用自己的数据集
+- 使用tqdm
+
+## 验证集、训练集的划分
+大概8：2划分，具体难度并不高。仅仅是记得使用函数shutil就OK了。
+```python
+"""本模块用于划分验证集和测试集，大概比例为8：2"""
+
+import shutil
+import os
+import random
+import glob
+
+def move_file(imgs,  new_path):
+    '''这个函数是用来移动图片从旧路径移到新路径'''
+
+    print(new_path)
+    # filelist = os.listdir(old_path) # 列出该目录下的所有文件,listdir返回的文件列表是不包含路径的。
+    filelist = imgs
+    print(filelist)
+    for file in filelist:
+        # file = file - "/home/lry/data/780b_std/"
+        src = file
+        dst = os.path.join(new_path, file[len('/home/lry/data/780b_singe_padded/'):])
+        print('src:', src)
+        print('dst:', dst)
+        shutil.move(src, dst)
+
+
+# old_path = "/home/lry/data/780b_std"
+
+new_val = "/home/lry/data/780b_singe_padded_std/val"
+new_train = "/home/lry/data/780b_singe_padded_std/train"
+
+pics = glob.glob("/home/lry/data/780b_singe_padded/*.jpg")
+# print(pics)
+print(len(pics))
+# print(pics[0][-30:])
+# print(len(pics))
+# print(pics[0][len("/home/lry/data/780b_std/"):-5] + ".jpg")
+# print(pics[0][:-4])
+# print(pics)
+
+print("moving....")
+move_file(pics[:-702], new_train)
+print("train end!")
+
+print("moving...")
+move_file(pics[-702:], new_val)
+print("val end!")
+
+
+# if __name__ == '__main__':
+#     pics = glob.glob("/home/lry/data/780b_singe_padded_std/train/*.jpg")
+#     print(len(pics))
+```
+
+
+## train_one_epoch函数
+
+这个具体的不多说，这里就写一下大致的流程：
+1. 利用dataloader加载数据
+2. 数据、模型部署到cudaGPU中
+3. 前向传播
+4. 计算loss
+5. 反向传播计算梯度
+6. 调用优化器优化更新权重
+7. 在torch.no_grad条件下计算val准确率。
+
+
+```python
+def train_one_epoch(model, trainloader, valloader, optimizer, criterion):
+    '''
+    训练一个epoch，返回该epoch的train_loss, train_acc, val_acc准确率
+    '''
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+
+    # train
+    correct = 0
+    total = 0
+    train_loss = 0.0
+    for i, data in enumerate(trainloader):
+        
+        labels, inputs = data[0].to(device), data[1].to(device)
+        
+        optimizer.zero_grad()
+
+        output = model(inputs)
+
+        _, predicted = torch.max(output.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+        loss = criterion(output, labels)
+        train_loss += loss
+        loss.backward()
+        optimizer.step()
+
+    train_loss = train_loss / 2808
+    train_acc = correct / total
+
+    # val准确率
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for data in valloader:
+            labels, images = data[0].to(device), data[1].to(device)
+            outputs = model(images)
+            _, predicted = torch.max(outputs.data, 1)
+            total += labels.size(0)
+            correct += (predicted == labels).sum().item()
+    val_acc = correct / total
+
+    return train_loss, train_acc, val_acc
+```
+
+## 关于导入模型
+> 2021.12.4更新。
+所有模型都在torchvision库里面，其中torchvision.models保存定义了许许多多我们需要的模型。具体导入方式也非常简单：直接`torchivision.models.resnet50(pretrained=True)`像这类就行,当然如果我们想要改一些东西，比如resnet50最后有一个一层的全连接层，我们想要改一下这个最后全连接层的输出,比方说目前我有14类输出但是torchvision官方的resnet50的model默认最后的全连接层是`nn.Linear(2048, 1000)`,因为这个是基于`Imagenet`数据集的。那么如果我们要更改，一个方法是可以查看该模型pytorch定义的源代码，因为
+`torchivision.models.resnet50(pretrained=True)`这个或者说这类函数是有相关的参数用来改最后全连接层的output的，或者可以选择 直接更改，就像我这里一样：
+```python
+# 导入模型
+model = models.resnet50(pretrained=True)
+# print(model)
+print(model.fc)  # 查看默认最后一层全连接层的结构
+# print(type(model.fc))
+# print(dict(model.fc.named_parameters()).keys())
+model.fc = nn.Linear(2048, num_classes)
+print(model.fc)
+```
+就是利用`model.fc = nn.Linear(2048, num_classes)`来定义最后一层的参数，这个很巧妙实际上，就相当于重新定义了一遍，改了相关的结构。
+
+
+
+
+## 关于部署到cuda上
+> 2021.12.4更新。
+
+这个我之前一直使用的是关于`device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")`来指定gpu训练，但是结果却并不是我想的那样在特定的gpu上训练. 这里用到了之前组长建议的一种用法，也是他们常用的做法,甚至当时我还在分割任务中做了的，这是我当时分割任务的运行代码：
+```python
+CUDA_VISIBLE_DEVICES=1 python tools/test.py configs/fenghuo/mask_rcnn_r50_caffe_fpn_mstrain-poly_1x_fenghuo.py work_dirs/mask_rcnn_r50_caffe_fpn_mstrain-poly_1x_fenghuo/latest.pth  --eval bbox segm
+```
+实际上也就是在相关运行python命令前加了`CUDA_VISIBLE_DEVICES=1`,CUDA：1，有时候要使用多张卡并行可以选择使用逗号分开两张卡，例如：CUDA_VISIBLE_DEVICES=1, 2。
+这样做之后模型会进行单卡训练，另外当我们要进行实时监控显存和进程相关使用的时候我们可以考虑使用`watch`命令，比如说使用以下命令：
+
+```python
+watch -n 1 nvidia-smi
+```
+这个代表每一秒刷新一次显卡使用情况。
+关于多卡这方面，是一门大学问，暂时先不看。
+
+## 关于batch_size
+> 2021.12.4更新。
+最一开始的时候调的batch_size
+
+
+
+## 关于并行GPU计算
+> 2021.12.4更新。
+
+## 进度条tqdm
+> 2021.12.4更新。
+
+## 任务完成启示与不足
+
+以上的任务成功写完，模型也成功跑完，结果如下(一个简单的结果)：
+[![](https://s6.jpg.cm/2021/12/03/LnBiyC.png)](https://imagelol.com/image/LnBiyC)
+目前只是完成了一个小的demo而已，整个项目有着非常多的任务需要继续做，还有好多代码继续写。
+接下来要完成的以及目前工作的不足在于：
+- 标签没有合并来训练，目前各个小类没有合并，仅仅是把每一个小类都分开训练了。
+- batch_size可以继续调高，因为目前的任务尝试batch_size=4可以发现显存占用了4000多兆，然而服务器单卡2080ti可以使用超过11000兆的显存，所以可以尝试跑满。当然目前4张卡有2张是空闲的，如果要进一步使用2张卡并行的话，可以试试[DISTRIBUTED DATA PARALLEL](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html),当然这个可能目前比较难，不过可以适当看一看，这样的话batch_size甚至可以调到20。
+- 目前仅仅导入使用了官方的resnet101，还可以试试其他模型
+- epoch可以往上调调试试
+- **模型、训练log记得保存**，包括一些关键的数据可以放到一个txt文档里面，写代码实现log的记录，可以参考mmdetection，它的记录就非常详细。
+
+
+
+## 保存训练权重，模型方法
+> 2021.12.4更新。
+
+https://zhuanlan.zhihu.com/p/38056115
+https://blog.csdn.net/weixin_40522801/article/details/106563354
+https://pytorch.org/tutorials/beginner/saving_loading_models.html
+
+## 调整batch_size
+> 2021.12.4更新。
+
+
+
+
+## 模型的类别合并
+> 2021.12.4更新。
+
+## 关于lr_scheduler
+> 2021.12.4更新。
+
+
+
+## 分类任务完成启示与不足
+
+本人任务接近收尾，目前还是非常满意的，至少对于结果来说：
+[![](https://s6.jpg.cm/2021/12/03/LnTsAT.png)](https://imagelol.com/image/LnTsAT)
+
+本来我还想进一步尝试一下不同的学习率和一些其他的模型，但是由于本次实验实际上对于任务本身已经完成了，如果想要深入研究可以之后做研究时或是想要探索再说了。
+而对于本次来看，实际上完全够了。接下来就我个人而言，我想做的一些东西就是：
+- [DISTRIBUTED DATA PARALLEL](https://pytorch.org/tutorials/intermediate/ddp_tutorial.html)多卡训练，可以问一下张维天学姐她的多卡训练是怎么弄的。
+- 多看看别人写的pytorch代码，不管是哪一类的代码都行
+- 关于分割任务的iou调节探索
+- transformer论文的阅读与学习，尤其是关于
+- 写完上面的文档(~~唉好多文档要写，可以先写多卡训练部分：边学多卡训练边写~~)
+- 导入模型方式也可以看看`hello-dian-ai`中的lab2导入预训练backbone的方式。
+
+
+
+这是截止到本周五我的这五天相关任务代码和时间的统计，python代码敲了16个小时，markdown笔记记了5个小时。总体来看本周三（12.1日）敲得最多，敲了7个多小时python代码。对于工作还是非常满意的！
+[![](https://s6.jpg.cm/2021/12/03/LnT0pO.png)](https://imagelol.com/image/LnT0pO)
+
+
+## DISTRIBUTED DATA PARALLEL
+
+
+
+
 
 
 
