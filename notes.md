@@ -2155,19 +2155,23 @@ CUDA_VISIBLE_DEVICES=1 python tools/test.py configs/fenghuo/mask_rcnn_r50_caffe_
 watch -n 1 nvidia-smi
 ```
 这个代表每一秒刷新一次显卡使用情况。
-关于多卡这方面，是一门大学问，暂时先不看。
+关于多卡这方面，是一门大学问，暂时先不在这里展开说。
 
 ## 关于batch_size
 > 2021.12.4更新。
-最一开始的时候调的batch_size
-
-
+最一开始的时候调的batch_size=128，但是结果一下子显存不足导致程序终止了。本来我以为这么好的显卡，害。还是我太肤浅了，本身图片大小就不小，一张图片`1800×180`这么大的图片确实(一般科研或是一些经典数据集训练都是`224×224`这类大小),再加上这些显存什么的和卡本身是2080ti还是3090没有关系，这个和显存有关系。而这个服务器的显存是12G，也不是很大，所以说最好还是不要用到这么大的batch_size了，后来改成`batch_size=4`,结果发现仅仅4个batch_size就消耗了几乎4个G的显存，后来试了试将batch_size调至10，结果差不多占了8个G的显存，预计batch_size=16能完全占满，不过这里没有继续实验。
 
 ## 关于并行GPU计算
 > 2021.12.4更新。
 
+
+
+
 ## 进度条tqdm
 > 2021.12.4更新。
+进度条怎么用，目前我只会用非常基本的，就是用一个`tqdm.tqdm()`内含一个iterable的参数比如列表这类。然后放到for里面进行循环。当然这似乎对我目前来说算是够了，但是如果想要更进一步的话可以看看[GitHub源码地址](https://github.com/tqdm/tqdm)，也有一个较为详细的introduction.
+
+
 
 ## 任务完成启示与不足
 
@@ -2186,22 +2190,31 @@ watch -n 1 nvidia-smi
 ## 保存训练权重，模型方法
 > 2021.12.4更新。
 
-https://zhuanlan.zhihu.com/p/38056115
-https://blog.csdn.net/weixin_40522801/article/details/106563354
-https://pytorch.org/tutorials/beginner/saving_loading_models.html
 
-## 调整batch_size
-> 2021.12.4更新。
+主要参考的就是以下文档们：
+- https://zhuanlan.zhihu.com/p/38056115
+- https://blog.csdn.net/weixin_40522801/article/details/106563354
+- https://pytorch.org/tutorials/beginner/saving_loading_models.html
 
-
-
+当然代码写得参考的最开始那篇知乎文档，模型保存代码为：
+```python
+launchTimestamp = str(time.time())
+        torch.save({'epoch': epoch + 1, 'state_dict': model.state_dict(), 'best_loss': best_loss,
+                            'optimizer': optimizer.state_dict()},
+                           '/home/lry/projects/mmdetection/lry/model_classification/checkpoints' + '/resnet50-m-' + launchTimestamp + '-' + str("%.4f" % best_loss) + '.pth.tar')
+        print(f'model {launchTimestamp} saved!')
+```
+目前还没尝试过加载模型，先不考虑了，以后再说吧。
 
 ## 模型的类别合并
 > 2021.12.4更新。
+这方面实际上大多都是脏活累活，需要介绍的恰恰不太多.
+不过确实比较考验代码能力。
+
 
 ## 关于lr_scheduler
 > 2021.12.4更新。
-
+参考文档：https://www.kaggle.com/isbhargav/guide-to-pytorch-learning-rate-scheduling
 
 
 ## 分类任务完成启示与不足
@@ -2225,6 +2238,167 @@ https://pytorch.org/tutorials/beginner/saving_loading_models.html
 
 
 ## DISTRIBUTED DATA PARALLEL
+
+Reference:
+- https://pytorch.org/tutorials/intermediate/ddp_tutorial.html
+- https://github.com/tczhangzhi/pytorch-distributed
+- https://zhuanlan.zhihu.com/p/31558973
+- https://www.cnblogs.com/jiangkejie/p/14603479.html
+- https://zhuanlan.zhihu.com/p/86441879
+
+
+## 修改分割任务的IOU
+
+mmlab最初默认的配置为：
+```python
+    # model training and testing settings
+    train_cfg=dict(
+        rpn=dict(
+            assigner=dict(
+                type='MaxIoUAssigner',
+                pos_iou_thr=0.7,
+                neg_iou_thr=0.3,
+                min_pos_iou=0.3,
+                match_low_quality=True,
+                ignore_iof_thr=-1),
+            sampler=dict(
+                type='RandomSampler',
+                num=256,
+                pos_fraction=0.5,
+                neg_pos_ub=-1,
+                add_gt_as_proposals=False),
+            allowed_border=-1,
+            pos_weight=-1,
+            debug=False),
+        rpn_proposal=dict(
+            nms_pre=2000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.7),
+            min_bbox_size=0),
+        rcnn=dict(
+            assigner=dict(
+                type='MaxIoUAssigner',
+                pos_iou_thr=0.5,
+                neg_iou_thr=0.5,
+                min_pos_iou=0.5,
+                match_low_quality=True,
+                ignore_iof_thr=-1),
+            sampler=dict(
+                type='RandomSampler',
+                num=512,
+                pos_fraction=0.25,
+                neg_pos_ub=-1,
+                add_gt_as_proposals=True),
+            mask_size=28,
+            pos_weight=-1,
+            debug=False)),
+    test_cfg=dict(
+        rpn=dict(
+            nms_pre=1000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.7),
+            min_bbox_size=0),
+        rcnn=dict(
+            score_thr=0.05,
+            nms=dict(type='nms', iou_threshold=0.5),
+            max_per_img=100,
+            mask_thr_binary=0.5)))
+```
+我们这里调整了相关的`pos_iou_thread=0.9 or 0.8`,当然rpn和rcnn以及nms部分都调了。调整后为：
+```python
+    # model training and testing settings
+    train_cfg=dict(
+        rpn=dict(
+            assigner=dict(
+                type='MaxIoUAssigner',
+                pos_iou_thr=0.9,
+                neg_iou_thr=0.5,
+                min_pos_iou=0.3,
+                match_low_quality=True,
+                ignore_iof_thr=-1),
+            sampler=dict(
+                type='RandomSampler',
+                num=256,
+                pos_fraction=0.5,
+                neg_pos_ub=-1,
+                add_gt_as_proposals=False),
+            allowed_border=-1,
+            pos_weight=-1,
+            debug=False),
+        rpn_proposal=dict(
+            nms_pre=2000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.9),
+            min_bbox_size=0),
+        rcnn=dict(
+            assigner=dict(
+                type='MaxIoUAssigner',
+                pos_iou_thr=0.8,
+                neg_iou_thr=0.5,
+                min_pos_iou=0.5,
+                match_low_quality=True,
+                ignore_iof_thr=-1),
+            sampler=dict(
+                type='RandomSampler',
+                num=512,
+                pos_fraction=0.25,
+                neg_pos_ub=-1,
+                add_gt_as_proposals=True),
+            mask_size=28,
+            pos_weight=-1,
+            debug=False)),
+    test_cfg=dict(
+        rpn=dict(
+            nms_pre=1000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.8),
+            min_bbox_size=0),
+        rcnn=dict(
+            score_thr=0.05,
+            nms=dict(type='nms', iou_threshold=0.8),
+            max_per_img=100,
+            mask_thr_binary=0.5)))
+
+```
+这个文档是我找config来回找最后回溯到的，由于回溯过程比较麻烦，文件名什么的命名，最后也是找了挺长时间找**准**了。精确位置在`/home/lry/projects/mmdetection/configs/_base_/models/mask_rcnn_r50_fpn.py`这里。
+
+别的没有太多改变，就训练完了之后有些了一个新的inference的python代码，在`/home/lry/projects/mmdetection/lry/compare_sege.py`,代码如下：
+```python
+"""本模块是一个小demo，用来对比单张图片结果怎么样"""
+
+from mmdet.apis import init_detector,inference_detector, show_result_pyplot
+import mmcv
+import os
+import glob
+from PIL import Image
+from torchvision.transforms import ToTensor
+import torch as t
+
+# 定义model
+config_file = "/home/lry/projects/mmdetection/configs/fenghuo/mask_rcnn_r50_caffe_fpn_mstrain-poly_1x_fenghuo.py"
+checkpoint_file_before = "/home/lry/projects/mmdetection/work_dirs/mask_rcnn_r50_caffe_fpn_mstrain-poly_1x_fenghuo/latest.pth"
+checkpoint_file_after = "/home/lry/checkpoints/fenghuo/model_segementation_maskrcnn_10/latest.pth"
+model_before = init_detector(config_file, checkpoint_file_before,device="cuda:3")
+model_after = init_detector(config_file, checkpoint_file_after,device="cuda:2")
+
+# 选取验证集的前10张图片进行验证
+imgs = glob.glob('/home/lry/data/780b_std/val/*.jpg')[:10]
+
+for i, img in enumerate(imgs):
+    result_b = inference_detector(model_before, img)
+    model_before.show_result(img, result_b, out_file=f'/home/lry/checkpoints/fenghuo/compare/before/demo_val{i}.jpg')
+
+    result_a = inference_detector(model_after, img)
+    model_after.show_result(img, result_a, out_file=f'/home/lry/checkpoints/fenghuo/compare/after/demo_val{i}.jpg')
+```
+
+
+
+
+## 训练注意
+这里训练的时候与组长交流的时候发现有这么一些问题：
+
+
 
 
 

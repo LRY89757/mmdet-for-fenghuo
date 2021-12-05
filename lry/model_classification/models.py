@@ -157,7 +157,7 @@ if __name__ == '__main__':
         train_loss, train_acc, val_acc = train_one_epoch(model, trainloader, valloader, optimizer, criterion)
         print(f'The {epoch + 1}th epoch\'s train_loss is {train_loss}, train_acc is {train_acc}, val_acc is {val_acc}')
         best_loss = min(best_loss, train_loss)
-        with open(f"{log}.log", 'w+') as f:
+        with open(f"{log}.log", 'a+') as f:
             f.write(f'The {epoch + 1}th epoch\'s train_loss is {train_loss}, train_acc is {train_acc}, val_acc is {val_acc}')
         
         launchTimestamp = str(time.time())
